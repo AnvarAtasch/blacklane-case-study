@@ -1,43 +1,36 @@
-# Blacklane Dispatching Optimization
+# Blacklane Case Study
 
-This project implements a data-driven dispatching optimization system for Blacklane's two-sided marketplace between guests and chauffeur service providers. The system analyzes historical data and makes intelligent decisions about whether to use pre-purchased shift capacity or leverage the auction-based marketplace for incoming bookings.
+## Overview
+This repository contains a comprehensive analysis of taxi service data, focusing on cost comparison between pre-purchased shifts and auction participation.
 
-## Project Structure
+## Dashboards
+1. Cost Comparison Dashboard (`src/ui/cost_comparison.py`)
+   - Analyzes cost differences between pre-purchased shifts and auction prices
+   - Visualizes cost distribution and trends
 
-```
-blacklane-case-study/
-├── data/                      # Data directory
-│   ├── raw/                   # Original CSV files
-│   └── processed/             # Processed data files
-├── src/                       # Source code
-│   ├── analysis/             # Analysis modules
-│   └── optimization/         # Optimization modules
-├── notebooks/                # Jupyter notebooks for analysis
-└── requirements.txt          # Python dependencies
-```
+2. Geographical Analysis Dashboard (`src/ui/geographical_analysis.py`)
+   - Maps pickup and dropoff locations
+   - Analyzes price variations by area
+   - Identifies price hotspots
 
-## Data Sources
+3. Time Analysis Dashboard (`src/ui/time_analysis.py`)
+   - Examines price variations by time of day and day of week
+   - Analyzes impact of weather and events on prices
+   - Provides correlation analysis
 
-The project uses three main data sources:
-
-1. **Pre-purchased Shifts** (`disp_pre_purchased_shifts.csv`)
-   - Contains information about pre-purchased chauffeur shifts
-   - Fields: shift_id, chauffeur_uuid, shift_date, shift_working_hours, hourly_rate_eur
-
-2. **Incoming Bookings** (`disp_incoming_bookings.csv`)
-   - Contains details about guest bookings
-   - Fields: booking_uuid, booker_uuid, chauffeur_uuid, booked_start_at, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, booked_duration, booked_distance, gross_revenue_eur
-
-3. **Historical Auction Data** (`disp_historical_auction_data.csv`)
-   - Contains historical auction outcomes
-   - Fields: booking_uuid, auction_corridor_min_price, auction_corridor_max_price, auction_winning_price
+## Data
+Sample data files are located in `data/raw/`:
+- `bookings.csv`: Booking information
+- `auction_data.csv`: Auction results
+- `pre_purchased_shifts.csv`: Pre-purchased shift data
+- `weather_data.csv`: Weather conditions
+- `events_data.csv`: Special events data
 
 ## Setup
-
 1. Create a virtual environment:
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # On Unix/macOS
 ```
 
 2. Install dependencies:
@@ -45,52 +38,16 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Place the CSV files in the `data/raw/` directory.
-
-## Usage
-
-1. Run data analysis:
+3. Run dashboards:
 ```bash
-python src/analysis/dispatch_analysis.py
+streamlit run src/ui/cost_comparison.py
+streamlit run src/ui/geographical_analysis.py
+streamlit run src/ui/time_analysis.py
 ```
 
-2. Run optimization model:
-```bash
-python src/optimization/dispatch_optimizer.py
-```
-
-## Key Features
-
-1. **Data Analysis**
-   - Supply and demand pattern analysis
-   - Auction behavior analysis
-   - KPI calculation and monitoring
-   - Data visualization
-
-2. **Optimization Engine**
-   - Machine learning-based decision system
-   - Real-time decision making
-   - Profit optimization
-   - Risk assessment
-
-## Performance Metrics
-
-The system tracks several key performance indicators:
-- Supply utilization rate
-- Revenue per hour
-- Cost per hour
-- Auction success rate
-- Decision confidence scores
-- Expected profit margins
-
-## Technical Implementation
-
-- Python 3.8+
-- pandas for data processing
-- scikit-learn for machine learning
-- matplotlib/seaborn for visualization
-- Jupyter notebooks for interactive analysis
-
-## Author
-
-Anvar Atash
+## Analysis Results
+The analysis covers three main hypotheses:
+1. Cost Effectiveness of Pre-purchased Shifts vs Auctions
+2. Impact of Booking Duration on Cost Differences
+3. Geographical Influence on Auction Prices
+4. Time and Event Impact on Auction Dynamics
