@@ -286,62 +286,78 @@ class DispatchAnalyzer:
             return None
     
     def analyze_supply_demand(self):
-        """Analyze supply and demand metrics"""
+        """Analyze supply and demand patterns with detailed metrics"""
         try:
-            # Basic metrics
-            total_bookings = len(self.bookings_df)
+            # Calculate supply metrics
+            supply_metrics = {}
+            
+            # Calculate total purchased hours
             total_hours = self.shifts_df['shift_working_hours'].sum()
+            supply_metrics['total_hours'] = total_hours
             
-            # Create a copy to avoid modifying original
-            auctions_df = self.auctions_df.copy()
-            bookings_df = self.bookings_df.copy()
+            # Calculate hourly supply distribution
+            hourly_supply = (
+                self.shifts_df
+                .assign(
+                    hour=pd.to_datetime(self.shifts_df['shift_date']).dt.hour,
+                    shift_cost=self.shifts_df['shift_working_hours'] * self.shifts_df['hourly_rate_eur']
+                )
+                .groupby('hour')
+                .agg({
+                    'shift_working_hours': 'sum',
+                    'shift_cost': 'sum',
+                    'hourly_rate_eur': ['mean', 'std']
+                })
+                .round(2)
+                .reset_index()
+            )
             
-            # Debug print
-            print("\nSample auction prices before conversion:")
-            print(auctions_df[['auction_winning_price', 'auction_corridor_min_price', 'auction_corridor_max_price']].head())
+            # Calculate demand metrics
+            demand_metrics = {}
             
-            # Convert auction prices to numeric, replacing invalid values with NaN
-            price_cols = ['auction_winning_price', 'auction_corridor_min_price', 'auction_corridor_max_price']
-            for col in price_cols:
-                if col in auctions_df.columns:
-                    # First convert to string and clean any potential formatting
-                    auctions_df[col] = (
-                        auctions_df[col]
-                        .astype(str)
-                        .str.replace(',', '')  # Remove commas
-                        .str.replace(' ', '')  # Remove spaces
-                        .str.extract(r'([\d.]+)', expand=False)  # Extract first number
-                    )
-                    # Then convert to numeric
-                    auctions_df[col] = pd.to_numeric(auctions_df[col], errors='coerce')
+            # Total bookings
+            total_bookings = len(self.bookings_df)
+            demand_metrics['total_bookings'] = total_bookings
             
-            # Debug print
-            print("\nSample auction prices after conversion:")
-            print(auctions_df[['auction_winning_price', 'auction_corridor_min_price', 'auction_corridor_max_price']].head())
+            # Calculate hourly demand distribution
+            hourly_demand = (
+                self.bookings_df
+                .assign(hour=pd.to_datetime(self.bookings_df['booked_start_at']).dt.hour)
+                .groupby('hour')
+                .agg({
+                    'booking_uuid': 'count',
+                    'gross_revenue_eur': ['sum', 'mean', 'std']
+                })
+                .round(2)
+                .reset_index()
+            )
             
-            # Drop rows where all price columns are NaN
-            auctions_df = auctions_df.dropna(subset=price_cols, how='all')
+            # Calculate auction metrics
+            auction_metrics = {}
             
-            # Merge with bookings to get the hour information
-            hourly_auctions = (
-                auctions_df
+            # Ensure numeric type for auction_winning_price
+            self.auctions_df['auction_winning_price'] = pd.to_numeric(self.auctions_df['auction_winning_price'], errors='coerce')
+            self.auctions_df['auction_corridor_min_price'] = pd.to_numeric(self.auctions_df['auction_corridor_min_price'], errors='coerce')
+            self.auctions_df['auction_corridor_max_price'] = pd.to_numeric(self.auctions_df['auction_corridor_max_price'], errors='coerce')
+            
+            # Overall auction statistics
+            auction_metrics['avg_winning_price'] = self.auctions_df['auction_winning_price'].mean()
+            auction_metrics['std_winning_price'] = self.auctions_df['auction_winning_price'].std()
+            
+            # Create a temporary DataFrame with hour information
+            auctions_with_hour = (
+                self.auctions_df
                 .merge(
-                    bookings_df[['booking_uuid', 'booked_start_at']],
+                    self.bookings_df[['booking_uuid', 'booked_start_at']],
                     on='booking_uuid',
                     how='left'
                 )
             )
+            auctions_with_hour['hour'] = pd.to_datetime(auctions_with_hour['booked_start_at']).dt.hour
             
-            # Extract hour and ensure it's numeric
-            hourly_auctions['hour'] = pd.to_datetime(hourly_auctions['booked_start_at']).dt.hour
-            
-            # Debug print
-            print("\nSample hourly auctions before aggregation:")
-            print(hourly_auctions[['hour'] + price_cols].head())
-            
-            # Group by hour and calculate statistics
-            hourly_stats = (
-                hourly_auctions
+            # Hourly auction statistics
+            hourly_auctions = (
+                auctions_with_hour
                 .groupby('hour')
                 .agg({
                     'auction_winning_price': ['mean', 'std', 'min', 'max'],
@@ -349,17 +365,8 @@ class DispatchAnalyzer:
                     'auction_corridor_max_price': 'mean'
                 })
                 .round(2)
+                .reset_index()
             )
-            
-            # Reset index to make hour a column
-            hourly_stats = hourly_stats.reset_index()
-            
-            # Debug print
-            print("\nHourly stats after aggregation:")
-            print(hourly_stats.head())
-            
-            # Flatten column names
-            hourly_stats.columns = ['hour', 'price_mean', 'price_std', 'price_min', 'price_max', 'corridor_min', 'corridor_max']
             
             # Calculate utilization and efficiency metrics
             efficiency_metrics = {}
@@ -368,258 +375,28 @@ class DispatchAnalyzer:
             efficiency_metrics['hours_per_booking'] = total_hours / total_bookings if total_bookings > 0 else 0
             
             # Average revenue per hour
-            total_revenue = pd.to_numeric(self.bookings_df['gross_revenue_eur'], errors='coerce').sum()
+            total_revenue = self.bookings_df['gross_revenue_eur'].sum()
             efficiency_metrics['revenue_per_hour'] = total_revenue / total_hours if total_hours > 0 else 0
             
             # Calculate idle hours
-            total_booked_hours = pd.to_numeric(self.bookings_df['booked_duration'], errors='coerce').sum() / 3600  # Convert seconds to hours
-            efficiency_metrics['idle_hours'] = total_hours - total_booked_hours if total_hours > total_booked_hours else 0
-            efficiency_metrics['utilization_rate'] = (total_booked_hours / total_hours * 100) if total_hours > 0 else 0
+            total_booking_hours = total_bookings * efficiency_metrics['hours_per_booking']
+            efficiency_metrics['idle_hours'] = max(0, total_hours - total_booking_hours)
+            efficiency_metrics['utilization_rate'] = (total_booking_hours / total_hours * 100) if total_hours > 0 else 0
             
             return {
-                'total_bookings': total_bookings,
-                'total_hours': total_hours,
-                'hourly_stats': hourly_stats,
-                'efficiency_metrics': efficiency_metrics
+                'supply_metrics': supply_metrics,
+                'demand_metrics': demand_metrics,
+                'auction_metrics': auction_metrics,
+                'efficiency_metrics': efficiency_metrics,
+                'hourly_supply': hourly_supply,
+                'hourly_demand': hourly_demand,
+                'hourly_auctions': hourly_auctions
             }
-            
         except Exception as e:
             print(f"Error in analyze_supply_demand: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
-    
-    def analyze_cost_revenue(self):
-        """Analyze cost vs revenue metrics"""
-        try:
-            # Calculate total cost from shifts
-            total_cost = (
-                self.shifts_df['hourly_rate_eur'] * self.shifts_df['shift_working_hours']
-            ).sum()
-            
-            # Calculate total revenue from bookings
-            total_revenue = pd.to_numeric(
-                self.bookings_df['gross_revenue_eur'], 
-                errors='coerce'
-            ).sum()
-            
-            return {
-                'total_cost': total_cost,
-                'total_revenue': total_revenue
-            }
-            
-        except Exception as e:
-            print(f"Error in analyze_cost_revenue: {str(e)}")
-            return None
-    
-    def plot_price_comparison(self, auction_agg, shift_costs):
-        """Create plots comparing auction prices vs shift costs"""
-        # Prepare data for plotting
-        auction_pivot = (
-            auction_agg
-            .pivot(
-                index='hour',
-                columns='day',
-                values='mean'
-            )
-            .round(2)
-        )
-        
-        shift_pivot = (
-            shift_costs
-            .pivot(
-                index='hour',
-                columns='day',
-                values='mean'
-            )
-            .round(2)
-        )
-        
-        # Create subplots
-        fig = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=('Average Auction Winning Price by Day and Hour', 'Average Shift Cost by Day and Hour'),
-            vertical_spacing=0.15
-        )
-        
-        # Add auction price heatmap
-        fig.add_trace(
-            go.Heatmap(
-                z=auction_pivot.values,
-                x=auction_pivot.columns,
-                y=auction_pivot.index,
-                colorscale='Viridis',
-                name='Auction Price',
-                colorbar=dict(title='EUR'),
-                hoverongaps=False
-            ),
-            row=1, col=1
-        )
-        
-        # Add shift cost heatmap
-        fig.add_trace(
-            go.Heatmap(
-                z=shift_pivot.values,
-                x=shift_pivot.columns,
-                y=shift_pivot.index,
-                colorscale='Viridis',
-                name='Shift Cost',
-                colorbar=dict(title='EUR'),
-                hoverongaps=False
-            ),
-            row=2, col=1
-        )
-        
-        # Update layout
-        fig.update_layout(
-            height=800,
-            title_text='Auction Prices vs Shift Costs Analysis',
-            title_x=0.5,
-            showlegend=False
-        )
-        
-        # Update y-axes
-        fig.update_yaxes(title_text='Hour of Day', row=1, col=1)
-        fig.update_yaxes(title_text='Hour of Day', row=2, col=1)
-        
-        return fig
-    
-    def calculate_kpis(self):
-        """Calculate key performance indicators"""
-        kpis = {}
-        
-        try:
-            # Supply utilization
-            total_hours = self.shifts_df['shift_working_hours'].sum()
-            total_bookings = len(self.bookings_df)
-            kpis['hours_per_booking'] = total_hours / total_bookings if total_bookings > 0 else 0
-            
-            # Revenue metrics
-            total_revenue = self.bookings_df['gross_revenue_eur'].sum()
-            total_shift_cost = (
-                self.shifts_df['hourly_rate_eur'] * self.shifts_df['shift_working_hours']
-            ).sum()
-            kpis['revenue_per_hour'] = total_revenue / total_hours if total_hours > 0 else 0
-            kpis['cost_per_hour'] = total_shift_cost / total_hours if total_hours > 0 else 0
-            
-            # Auction efficiency
-            if 'profit_margin' not in self.auctions_df.columns:
-                self.auctions_df['profit_margin'] = (
-                    self.auctions_df['auction_winning_price'] - 
-                    self.auctions_df['auction_corridor_min_price']
-                )
-            avg_auction_margin = self.auctions_df['profit_margin'].mean()
-            kpis['avg_auction_margin'] = avg_auction_margin if pd.notnull(avg_auction_margin) else 0
-            
-        except Exception as e:
-            print(f"Error calculating KPIs: {str(e)}")
-            # Set default values if calculation fails
-            kpis = {
-                'hours_per_booking': 0,
-                'revenue_per_hour': 0,
-                'cost_per_hour': 0,
-                'avg_auction_margin': 0
-            }
-        
-        return kpis
-    
-    def analyze_supply_demand(self):
-        """Analyze supply and demand patterns with detailed metrics"""
-        # Calculate supply metrics
-        supply_metrics = {}
-        
-        # Calculate total purchased hours
-        total_hours = self.shifts_df['shift_working_hours'].sum()
-        supply_metrics['total_hours'] = total_hours
-        
-        # Calculate hourly supply distribution
-        hourly_supply = (
-            self.shifts_df
-            .assign(
-                hour=pd.to_datetime(self.shifts_df['shift_date']).dt.hour,
-                shift_cost=self.shifts_df['shift_working_hours'] * self.shifts_df['hourly_rate_eur']
-            )
-            .groupby('hour')
-            .agg({
-                'shift_working_hours': 'sum',
-                'shift_cost': 'sum',
-                'hourly_rate_eur': ['mean', 'std']
-            })
-            .round(2)
-            .reset_index()
-        )
-        
-        # Calculate demand metrics
-        demand_metrics = {}
-        
-        # Total bookings
-        total_bookings = len(self.bookings_df)
-        demand_metrics['total_bookings'] = total_bookings
-        
-        # Calculate hourly demand distribution
-        hourly_demand = (
-            self.bookings_df
-            .assign(hour=pd.to_datetime(self.bookings_df['booked_start_at']).dt.hour)
-            .groupby('hour')
-            .agg({
-                'booking_uuid': 'count',
-                'gross_revenue_eur': ['sum', 'mean', 'std']
-            })
-            .round(2)
-            .reset_index()
-        )
-        
-        # Calculate auction metrics
-        auction_metrics = {}
-        
-        # Overall auction statistics
-        auction_metrics['avg_winning_price'] = self.auctions_df['auction_winning_price'].mean()
-        auction_metrics['std_winning_price'] = self.auctions_df['auction_winning_price'].std()
-        
-        # Hourly auction statistics
-        hourly_auctions = (
-            self.auctions_df
-            .merge(
-                self.bookings_df[['booking_uuid', 'booked_start_at']],
-                on='booking_uuid',
-                how='left'
-            )
-            .assign(hour=pd.to_datetime(self.bookings_df['booked_start_at']).dt.hour)
-            .groupby('hour')
-            .agg({
-                'auction_winning_price': ['mean', 'std', 'min', 'max'],
-                'auction_corridor_min_price': 'mean',
-                'auction_corridor_max_price': 'mean'
-            })
-            .round(2)
-            .reset_index()
-        )
-        
-        # Calculate utilization and efficiency metrics
-        efficiency_metrics = {}
-        
-        # Hours per booking
-        efficiency_metrics['hours_per_booking'] = total_hours / total_bookings if total_bookings > 0 else 0
-        
-        # Average revenue per hour
-        total_revenue = self.bookings_df['gross_revenue_eur'].sum()
-        efficiency_metrics['revenue_per_hour'] = total_revenue / total_hours if total_hours > 0 else 0
-        
-        # Calculate idle hours (if possible)
-        # This is a simplified calculation assuming each booking takes the average duration
-        total_booking_hours = total_bookings * efficiency_metrics['hours_per_booking']
-        efficiency_metrics['idle_hours'] = max(0, total_hours - total_booking_hours)
-        efficiency_metrics['utilization_rate'] = (total_booking_hours / total_hours * 100) if total_hours > 0 else 0
-        
-        return {
-            'supply_metrics': supply_metrics,
-            'demand_metrics': demand_metrics,
-            'auction_metrics': auction_metrics,
-            'efficiency_metrics': efficiency_metrics,
-            'hourly_supply': hourly_supply,
-            'hourly_demand': hourly_demand,
-            'hourly_auctions': hourly_auctions
-        }
     
     def analyze_shift_utilization(self):
         """Analyze shift utilization by comparing scheduled vs actual hours"""

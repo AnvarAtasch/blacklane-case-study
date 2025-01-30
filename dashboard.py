@@ -179,8 +179,8 @@ def display_supply_demand(analyzer):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric("Total Bookings", f"{analysis['total_bookings']:,}")
-            st.metric("Total Hours", f"{analysis['total_hours']:.1f}")
+            st.metric("Total Bookings", f"{analysis['demand_metrics']['total_bookings']:,}")
+            st.metric("Total Hours", f"{analysis['supply_metrics']['total_hours']:.1f}")
         
         with col2:
             metrics = analysis['efficiency_metrics']
@@ -190,25 +190,27 @@ def display_supply_demand(analyzer):
         
         # Display hourly statistics
         st.subheader("Hourly Statistics")
-        hourly_stats = analysis['hourly_stats']
         
         # Create the line chart
         fig = go.Figure()
         
+        # Add auction statistics
+        hourly_auctions = analysis['hourly_auctions']
+        
         # Add mean auction price line
         fig.add_trace(go.Scatter(
-            x=hourly_stats['hour'],
-            y=hourly_stats['price_mean'],
+            x=hourly_auctions['hour'],
+            y=hourly_auctions['auction_winning_price']['mean'],
             name='Mean Auction Price',
             line=dict(color='blue')
         ))
         
         # Add standard deviation range
-        upper_bound = hourly_stats['price_mean'] + hourly_stats['price_std']
-        lower_bound = hourly_stats['price_mean'] - hourly_stats['price_std']
+        upper_bound = hourly_auctions['auction_winning_price']['mean'] + hourly_auctions['auction_winning_price']['std']
+        lower_bound = hourly_auctions['auction_winning_price']['mean'] - hourly_auctions['auction_winning_price']['std']
         
         fig.add_trace(go.Scatter(
-            x=hourly_stats['hour'],
+            x=hourly_auctions['hour'],
             y=upper_bound,
             fill=None,
             mode='lines',
@@ -217,7 +219,7 @@ def display_supply_demand(analyzer):
         ))
         
         fig.add_trace(go.Scatter(
-            x=hourly_stats['hour'],
+            x=hourly_auctions['hour'],
             y=lower_bound,
             fill='tonexty',
             mode='lines',
@@ -227,16 +229,16 @@ def display_supply_demand(analyzer):
         
         # Add min/max corridor
         fig.add_trace(go.Scatter(
-            x=hourly_stats['hour'],
-            y=hourly_stats['corridor_max'],
+            x=hourly_auctions['hour'],
+            y=hourly_auctions['auction_corridor_max_price'],
             mode='lines',
             line=dict(dash='dash', color='red'),
             name='Max Price Corridor'
         ))
         
         fig.add_trace(go.Scatter(
-            x=hourly_stats['hour'],
-            y=hourly_stats['corridor_min'],
+            x=hourly_auctions['hour'],
+            y=hourly_auctions['auction_corridor_min_price'],
             mode='lines',
             line=dict(dash='dash', color='green'),
             name='Min Price Corridor'
@@ -247,13 +249,139 @@ def display_supply_demand(analyzer):
             title='Auction Prices by Hour',
             xaxis_title='Hour of Day',
             yaxis_title='Price (EUR)',
-            hovermode='x unified'
+            hovermode='x unified',
+            template='plotly_dark',
+            height=400,
+            margin=dict(t=50, b=50, l=50, r=50)
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
+        # Display hourly supply and demand
+        st.subheader("Supply vs Demand by Hour")
+        
+        # Create a new figure for supply vs demand
+        fig2 = go.Figure()
+        
+        # Add supply line
+        hourly_supply = analysis['hourly_supply']
+        fig2.add_trace(go.Scatter(
+            x=hourly_supply['hour'],
+            y=hourly_supply['shift_working_hours'],
+            name='Supply (Hours)',
+            line=dict(color='orange')
+        ))
+        
+        # Add demand line
+        hourly_demand = analysis['hourly_demand']
+        fig2.add_trace(go.Scatter(
+            x=hourly_demand['hour'],
+            y=hourly_demand['booking_uuid']['count'],
+            name='Demand (Bookings)',
+            line=dict(color='blue')
+        ))
+        
+        # Update layout
+        fig2.update_layout(
+            title='Supply and Demand by Hour',
+            xaxis_title='Hour of Day',
+            yaxis_title='Count',
+            hovermode='x unified',
+            template='plotly_dark',
+            height=400,
+            margin=dict(t=50, b=50, l=50, r=50)
+        )
+        
+        st.plotly_chart(fig2, use_container_width=True)
+        
     else:
         st.error("Failed to load supply and demand analysis data")
+
+def display_auction_vs_revenue(analyzer):
+    """Display the Auction Winning Price vs Gross Revenue analysis"""
+    st.title("Auction Winning Price vs Gross Revenue")
+    
+    # Get the data from analyzer
+    bookings_df = analyzer.bookings_df
+    auctions_df = analyzer.auctions_df
+    
+    if not bookings_df.empty and not auctions_df.empty:
+        # Merge bookings and auctions data
+        merged_df = pd.merge(
+            bookings_df[['booking_uuid', 'booked_start_at', 'gross_revenue_eur']],
+            auctions_df[['booking_uuid', 'auction_winning_price']],
+            on='booking_uuid',
+            how='inner'
+        )
+        
+        # Extract hour from timestamp
+        merged_df['hour'] = pd.to_datetime(merged_df['booked_start_at']).dt.hour
+        
+        # Group by hour and calculate means
+        hourly_metrics = merged_df.groupby('hour').agg({
+            'auction_winning_price': 'mean',
+            'gross_revenue_eur': 'mean'
+        }).reset_index()
+        
+        # Create the line chart
+        fig = go.Figure()
+        
+        # Add auction winning price line
+        fig.add_trace(go.Scatter(
+            x=hourly_metrics['hour'],
+            y=hourly_metrics['auction_winning_price'],
+            name='Auction Winning Price',
+            line=dict(color='orange', width=2)
+        ))
+        
+        # Add gross revenue line
+        fig.add_trace(go.Scatter(
+            x=hourly_metrics['hour'],
+            y=hourly_metrics['gross_revenue_eur'],
+            name='Gross Revenue',
+            line=dict(color='blue', width=2)
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Average Auction Winning Price vs Gross Revenue by Hour of Day',
+            xaxis_title='Hour of Day',
+            yaxis_title='Amount (EUR)',
+            template='plotly_dark',
+            height=400,
+            margin=dict(t=50, b=50, l=50, r=50),
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Display hourly metrics table
+        st.subheader("Hourly Metrics")
+        
+        # Format the DataFrame for display
+        formatted_df = hourly_metrics.copy()
+        formatted_df['auction_winning_price'] = formatted_df['auction_winning_price'].apply(lambda x: f"€{x:.2f}")
+        formatted_df['gross_revenue_eur'] = formatted_df['gross_revenue_eur'].apply(lambda x: f"€{x:.2f}")
+        
+        # Rename columns for display
+        formatted_df.columns = ['Hour', 'Avg Auction Winning Price (EUR)', 'Avg Gross Revenue (EUR)']
+        
+        st.dataframe(
+            formatted_df,
+            column_config={
+                "Hour": st.column_config.NumberColumn(width="small"),
+                "Avg Auction Winning Price (EUR)": st.column_config.TextColumn(width="medium"),
+                "Avg Gross Revenue (EUR)": st.column_config.TextColumn(width="medium")
+            },
+            hide_index=True
+        )
+    else:
+        st.error("Failed to load auction and revenue analysis data")
 
 def main():
     st.set_page_config(
@@ -279,10 +407,11 @@ def main():
             return
         
         # Add tabs
-        tab1, tab2, tab3 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "Performance Metrics",
             "Shift Utilization Analysis",
-            "Supply & Demand Analysis"
+            "Supply & Demand Analysis",
+            "Auction Winning Price vs Gross Revenue"
         ])
         
         with tab1:
@@ -306,6 +435,14 @@ def main():
                 display_supply_demand(analyzer)
             except Exception as e:
                 st.error(f"Error in Supply & Demand tab: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+        
+        with tab4:
+            try:
+                display_auction_vs_revenue(analyzer)
+            except Exception as e:
+                st.error(f"Error in Auction Winning Price vs Gross Revenue tab: {str(e)}")
                 import traceback
                 st.error(traceback.format_exc())
     
